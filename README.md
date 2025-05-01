@@ -91,7 +91,24 @@ export SET_TYPE=validation
 export STRATEGY=direct
 
 cd tools/planner
-python sole_planning.py  --set_type $SET_TYPE --output_dir $OUTPUT_DIR --model_name $MODEL_NAME --strategy $STRATEGY
+python sole_planning.py  --set_type $SET_TYPE --output_dir $OUTPUT_DIR --model_name 
+$MODEL_NAME --strategy $STRATEGY
+```
+
+### Sole-Planning Agent Mode
+
+```bash
+# We support MODEL in ['gpt-3.5-turbo-X','gpt-4-1106-preview','gemini','mistral-7B-32K','mixtral']
+export MODEL_NAME=MODEL_NAME
+export OPENAI_API_KEY=YOUR_OPENAI_KEY
+# if you do not want to test google models, like gemini, just input "1".
+export GOOGLE_API_KEY=YOUR_GOOGLE_KEY
+# SET_TYPE in ['validation', 'test']
+export SET_TYPE=validation
+# AGENT_FRAMEWORK in ['smolagents'] (More frameworks will be added)
+export AGENT_FRAMEWORK=smolagents
+
+pipenv run python -m tools.planner.sole_planning_agent --set_type validation --output_dir ../../results --model_name $MODEL_NAME --agent_framework $AGENT_FRAMEWORK
 ```
 
 ## Postprocess
