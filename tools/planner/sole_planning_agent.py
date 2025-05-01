@@ -7,6 +7,7 @@ from agents.prompts import planner_agent_prompt # direct strategy prompt only
 # from utils.func import get_valid_name_city,extract_before_parenthesis, extract_numbers_from_filenames
 import json
 import time
+import datetime # Import datetime module
 # from langchain.callbacks import get_openai_callback # Remove langchain callback if not used with smolagents
 
 from tqdm import tqdm
@@ -82,6 +83,10 @@ if __name__ == "__main__":
 
     # Strategy fixed to direct
     strategy = "direct"
+
+    # Initialize token counters
+    total_input_tokens = 0
+    total_output_tokens = 0
     
     for number in tqdm(numbers[:]):
 
@@ -116,6 +121,12 @@ if __name__ == "__main__":
             if planner_results != None:
                 break
 
+        # Get token counts
+        if args.agent_framework == "smolagents":
+            token_counts = agent.monitor.get_total_token_counts()
+            total_input_tokens += token_counts.get("input")
+            total_output_tokens += token_counts.get("output")
+
         print(planner_results)
         # check if the directory exists
         if not os.path.exists(os.path.join(f'{args.output_dir}/{args.set_type}')):
@@ -132,3 +143,49 @@ if __name__ == "__main__":
         # write to json file
         with open(os.path.join(f'{args.output_dir}/{args.set_type}/generated_plan_{number}.json'), 'w') as f:
             json.dump(result, f, indent=4, ensure_ascii=False)
+
+    # ----- Token Usage Aggregation and Saving ------
+    # Prepare data for JSON
+    model_name_for_key = args.model_name.replace("/", "-")
+    usage_key = f'{args.agent_framework}_{model_name_for_key}_{strategy}_sole-planning_results'
+    timestamp = datetime.datetime.now().isoformat() # Get current timestamp
+    usage_data = {
+        usage_key: {
+            "total_input_tokens": total_input_tokens,
+            "total_output_tokens": total_output_tokens,
+            "data_count": len(numbers), # Number of queries processed
+            "timestamp": timestamp # Add timestamp
+        }
+    }
+
+    # Define JSON file path
+    token_usage_file_path = os.path.join(f'{args.output_dir}/{args.set_type}', 'token_usages.json')
+
+    # Read existing data or initialize
+    all_usages = []
+    if os.path.exists(token_usage_file_path):
+        try:
+            with open(token_usage_file_path, 'r') as f:
+                all_usages = json.load(f)
+            if not isinstance(all_usages, list):
+                print(f"Warning: Content in {token_usage_file_path} is not a list. Re-initializing.")
+                all_usages = []
+        except json.JSONDecodeError:
+            print(f"Warning: Could not decode JSON from {token_usage_file_path}. Re-initializing.")
+            all_usages = []
+        except FileNotFoundError:
+            pass # File doesn't exist yet, will be created
+
+    # Append new usage data
+    all_usages.append(usage_data)
+
+    # Write updated data back to JSON
+    try:
+        # Ensure the directory exists
+        os.makedirs(os.path.dirname(token_usage_file_path), exist_ok=True)
+        with open(token_usage_file_path, 'w') as f:
+            json.dump(all_usages, f, indent=4, ensure_ascii=False)
+        print(f"Token usage saved to {token_usage_file_path}")
+    except Exception as e:
+        print(f"Error saving token usage to {token_usage_file_path}: {e}")
+
