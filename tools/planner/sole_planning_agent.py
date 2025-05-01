@@ -3,7 +3,7 @@ import re
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.getcwd(), "../..")))
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
-from agents.prompts import planner_agent_prompt # direct strategy prompt only
+from project_agents.prompts import planner_agent_prompt # direct strategy prompt only
 # from utils.func import get_valid_name_city,extract_before_parenthesis, extract_numbers_from_filenames
 import json
 import time
@@ -15,14 +15,25 @@ from tqdm import tqdm
 # import openai
 import argparse
 from datasets import load_dataset
-from typing import Any
+from typing import Any, List, Dict
 
 # Add smolagents imports
 try:
     from smolagents import CodeAgent, LiteLLMModel
 except ImportError:
-    print("smolagents not installed. Please run `pip install -r requirements.txt`")
-    sys.exit(1)
+    print("smolagents not installed. Please run `uv add smolagents litellm`")
+    CodeAgent = None
+    LiteLLMModel = None
+
+# Add openai-agents imports
+try:
+    from agents import Agent as OpenAIAgent, Runner, Usage as OpenAIUsage, ModelSettings as OpenAIModelSettings
+except ImportError:
+    print("openai-agents not installed. Please run `uv add openai-agents`")
+    OpenAIAgent = None
+    Runner = None
+    OpenAIUsage = None
+    OpenAIModelSettings = None
 
 
 def load_line_json_data(filename):
@@ -67,10 +78,13 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--set_type", type=str, default="validation")
-    parser.add_argument("--model_name", type=str, default="openai/gpt-4.1-2025-04-14", help="Model name for the LLM (e.g., 'gpt-3.5-turbo-1106', 'claude-3-opus-20240229').")
+    parser.add_argument("--model_name", type=str, default="openai/gpt-4.1-2025-04-14", help="Model name for the LLM (e.g., 'openai/gpt-4o-mini', 'openai/gpt-4.1-2025-04-14').")
     parser.add_argument("--output_dir", type=str, default="./")
     # parser.add_argument("--strategy", type=str, default="direct") # Strategy fixed to direct
-    parser.add_argument("--agent_framework", type=str, default="smolagents", choices=["smolagents"], help="Agent framework to use.") # Add agent_framework argument
+    parser.add_argument("--agent_framework", type=str, default="smolagents", choices=["smolagents", "openai_agents"], help="Agent framework to use.") # Add agent_framework argument
+    parser.add_argument("--temperature", type=float, default=0.0, help="Temperature for the LLM.")
+    parser.add_argument("--top_p", type=float, default=1.0, help="Top-p for the LLM.")
+    parser.add_argument("--max_tokens", type=int, default=None, help="Max tokens for the LLM.")
     args = parser.parse_args()
     directory = f'{args.output_dir}/{args.set_type}'
     if args.set_type == 'train':
@@ -87,33 +101,74 @@ if __name__ == "__main__":
     # Initialize token counters
     total_input_tokens = 0
     total_output_tokens = 0
-    
+    total_usage_openai = None # Initialize usage counter for openai_agents
+
+    # Initialize total usage counter for openai_agents if needed
+    if args.agent_framework == "openai_agents":
+        if OpenAIUsage is None:
+            print("Error: openai-agents package not found or OpenAIUsage class missing.")
+            sys.exit(1)
+        total_usage_openai = OpenAIUsage()
+
     for number in tqdm(numbers[:]):
 
         # Initialize agent based on framework
         agent = None
         if args.agent_framework == "smolagents":
-            llm_model = LiteLLMModel(model_id=args.model_name)
+            if CodeAgent is None or LiteLLMModel is None:
+                 print("Error: smolagents package not found or classes missing.")
+                 sys.exit(1)
+            llm_model = LiteLLMModel(
+                model_id=args.model_name,
+                temperature=args.temperature,
+                top_p=args.top_p,
+                max_tokens=args.max_tokens,
+            )
             # Use the direct strategy prompt (planner_agent_prompt) for system prompt/instructions
             agent = CodeAgent(
                 tools=[], # No tools defined for sole planning
                 model=llm_model,
             )
             print(f"Initialized smolagents CodeAgent with model: {args.model_name}")
+        elif args.agent_framework == "openai_agents":
+            if OpenAIAgent is None or Runner is None or OpenAIModelSettings is None:
+                print("Error: openai-agents package not found or classes missing.")
+                sys.exit(1)
+            # Instructions are derived from the prompt format later
+            agent = OpenAIAgent( # Use the aliased name
+                name="TravelPlannerAgent",
+                model=args.model_name,
+                model_settings=OpenAIModelSettings(
+                    temperature=args.temperature,
+                    top_p=args.top_p,
+                    max_tokens=args.max_tokens,
+                )
+            )
+            print(f"Initialized OpenAI Agent with model: {args.model_name}")
         else:
             print(f"Error: Unsupported agent_framework '{args.agent_framework}'")
             sys.exit(1)
-        
+
         query_data = query_data_list[number-1]
         reference_information = query_data['reference_information']
+        agent_response = None
         while True:
-            # Format the prompt string
-            prompt = planner_agent_prompt.format(text=reference_information, query=query_data['query'])
+            # Format the prompt string - used differently depending on the framework
+            prompt_text = planner_agent_prompt.format(text=reference_information, query=query_data['query'])
 
             # Call the agent
             if args.agent_framework == "smolagents":
-                result_obj = agent.run(prompt, reset=True)
-                planner_results = smolagents_output_to_string(result_obj)
+                agent_response = agent.run(prompt_text, reset=True)
+                planner_results = smolagents_output_to_string(agent_response)
+            elif args.agent_framework == "openai_agents":
+                agent_response = Runner.run_sync(agent, prompt_text)
+                planner_results = agent_response.final_output
+
+                # Accumulate token usage for this run
+                if total_usage_openai is not None:
+                    for resp in agent_response.raw_responses:
+                            if hasattr(resp, 'usage') and resp.usage is not None:
+                                total_usage_openai.add(resp.usage)
             else:
                 print(f"Error: Unsupported agent_framework '{args.agent_framework}'")
                 sys.exit(1)
@@ -126,6 +181,11 @@ if __name__ == "__main__":
             token_counts = agent.monitor.get_total_token_counts()
             total_input_tokens += token_counts.get("input")
             total_output_tokens += token_counts.get("output")
+        elif args.agent_framework == "openai_agents" and total_usage_openai is not None:
+            for resp in agent_response.raw_responses:
+                if hasattr(resp, 'usage') and resp.usage is not None:
+                    total_input_tokens += resp.usage.input_tokens
+                    total_output_tokens += resp.usage.output_tokens
 
         print(planner_results)
         # check if the directory exists
