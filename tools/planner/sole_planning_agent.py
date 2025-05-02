@@ -82,7 +82,7 @@ if __name__ == "__main__":
     parser.add_argument("--output_dir", type=str, default="./")
     # parser.add_argument("--strategy", type=str, default="direct") # Strategy fixed to direct
     parser.add_argument("--agent_framework", type=str, default="smolagents", choices=["smolagents", "openai_agents"], help="Agent framework to use.") # Add agent_framework argument
-    parser.add_argument("--temperature", type=float, default=0.0, help="Temperature for the LLM.")
+    parser.add_argument("--temperature", type=float, default=0.2, help="Temperature for the LLM.")
     parser.add_argument("--top_p", type=float, default=1.0, help="Top-p for the LLM.")
     parser.add_argument("--max_tokens", type=int, default=None, help="Max tokens for the LLM.")
     args = parser.parse_args()
