@@ -44,6 +44,13 @@ except ImportError:
     create_react_agent = None
     ChatOpenAI = None
 
+# Add pydantic-ai imports
+try:
+    from pydantic_ai import Agent as PydanticAgent
+except ImportError:
+    print("pydantic-ai not installed. Please run `uv add pydantic-ai`")
+    PydanticAgent = None
+
 def load_line_json_data(filename):
     data = []
     with open(filename, 'r', encoding='utf-8') as f:
@@ -89,7 +96,7 @@ if __name__ == "__main__":
     parser.add_argument("--model_name", type=str, default="openai/gpt-4.1-2025-04-14", help="Model name for the LLM (e.g., 'openai/gpt-4o-mini', 'openai/gpt-4.1-2025-04-14').")
     parser.add_argument("--output_dir", type=str, default="./")
     # parser.add_argument("--strategy", type=str, default="direct") # Strategy fixed to direct
-    parser.add_argument("--agent_framework", type=str, default="smolagents", choices=["smolagents", "openai_agents", "langgraph"], help="Agent framework to use.") # Add agent_framework argument
+    parser.add_argument("--agent_framework", type=str, default="smolagents", choices=["smolagents", "openai_agents", "langgraph", "pydanticai"], help="Agent framework to use.") # Add agent_framework argument
     parser.add_argument("--temperature", type=float, default=0.2, help="Temperature for the LLM.")
     parser.add_argument("--top_p", type=float, default=1.0, help="Top-p for the LLM.")
     parser.add_argument("--max_tokens", type=int, default=None, help="Max tokens for the LLM.")
@@ -165,7 +172,7 @@ if __name__ == "__main__":
                 llm = ChatOpenAI(
                     model=processed_model_name,
                     temperature=args.temperature,
-                    model_kwargs={"top_p": args.top_p}, # Pass top_p via model_kwargs
+                    top_p=args.top_p,
                     max_tokens=args.max_tokens,
                 )
             else:
@@ -177,14 +184,35 @@ if __name__ == "__main__":
             # Tools are empty for this task.
             agent = create_react_agent(llm, tools=[])
             print(f"Initialized LangGraph ReAct Agent with model: {processed_model_name}")
+        elif args.agent_framework == "pydanticai":
+            if PydanticAgent is None:
+                print("Error: pydantic-ai package not found.")
+                sys.exit(1)
 
+            # Process model name for pydantic-ai (e.g., openai/gpt-4o-mini -> openai:gpt-4o-mini)
+            processed_model_id = args.model_name
+            if "/" in args.model_name:
+                prefix, suffix = args.model_name.split("/", 1)
+                if prefix == "openai":
+                    processed_model_id = f"{prefix}:{suffix}"
+                else:
+                    print(f"Warning: Using pydantic-ai with non-openai prefix model: {args.model_name}")
+
+            agent = PydanticAgent(
+                model=processed_model_id,
+                model_settings={
+                    'temperature': args.temperature,
+                    'max_tokens': args.max_tokens,
+                    'top_p': args.top_p,
+                },
+            )
+            print(f"Initialized PydanticAI Agent with model: {processed_model_id}")
         else:
             print(f"Error: Unsupported agent_framework '{args.agent_framework}'")
             sys.exit(1)
 
         query_data = query_data_list[number-1]
         reference_information = query_data['reference_information']
-        agent_response = None
         token_usage = {"input_tokens": 0, "output_tokens": 0}
         while True:
             # Format the prompt string - used differently depending on the framework
@@ -219,6 +247,16 @@ if __name__ == "__main__":
                 usage = agent_message_dict.response_metadata["token_usage"]
                 token_usage["input_tokens"] = usage.get('prompt_tokens')
                 token_usage["output_tokens"] = usage.get('completion_tokens')
+            elif args.agent_framework == "pydanticai":
+                # Run pydantic-ai agent
+                # PydanticAI agent.run() expects user_prompt
+                agent_response = agent.run_sync(user_prompt=prompt_text)
+                planner_results = agent_response.output
+
+                # Accumulate token usage
+                usage = agent_response.usage()
+                token_usage["input_tokens"] = usage.request_tokens
+                token_usage["output_tokens"] = usage.response_tokens
             else:
                 print(f"Error: Unsupported agent_framework '{args.agent_framework}'")
                 sys.exit(1)
