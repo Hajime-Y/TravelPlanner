@@ -35,6 +35,14 @@ except ImportError:
     OpenAIUsage = None
     OpenAIModelSettings = None
 
+# Add langgraph imports
+try:
+    from langgraph.prebuilt import create_react_agent
+    from langchain_openai import ChatOpenAI
+except ImportError:
+    print("langgraph or langchain-openai not installed. Please run `uv add langgraph langchain-openai`")
+    create_react_agent = None
+    ChatOpenAI = None
 
 def load_line_json_data(filename):
     data = []
@@ -81,7 +89,7 @@ if __name__ == "__main__":
     parser.add_argument("--model_name", type=str, default="openai/gpt-4.1-2025-04-14", help="Model name for the LLM (e.g., 'openai/gpt-4o-mini', 'openai/gpt-4.1-2025-04-14').")
     parser.add_argument("--output_dir", type=str, default="./")
     # parser.add_argument("--strategy", type=str, default="direct") # Strategy fixed to direct
-    parser.add_argument("--agent_framework", type=str, default="smolagents", choices=["smolagents", "openai_agents"], help="Agent framework to use.") # Add agent_framework argument
+    parser.add_argument("--agent_framework", type=str, default="smolagents", choices=["smolagents", "openai_agents", "langgraph"], help="Agent framework to use.") # Add agent_framework argument
     parser.add_argument("--temperature", type=float, default=0.2, help="Temperature for the LLM.")
     parser.add_argument("--top_p", type=float, default=1.0, help="Top-p for the LLM.")
     parser.add_argument("--max_tokens", type=int, default=None, help="Max tokens for the LLM.")
@@ -101,14 +109,6 @@ if __name__ == "__main__":
     # Initialize token counters
     total_input_tokens = 0
     total_output_tokens = 0
-    total_usage_openai = None # Initialize usage counter for openai_agents
-
-    # Initialize total usage counter for openai_agents if needed
-    if args.agent_framework == "openai_agents":
-        if OpenAIUsage is None:
-            print("Error: openai-agents package not found or OpenAIUsage class missing.")
-            sys.exit(1)
-        total_usage_openai = OpenAIUsage()
 
     for number in tqdm(numbers[:]):
 
@@ -145,6 +145,39 @@ if __name__ == "__main__":
                 )
             )
             print(f"Initialized OpenAI Agent with model: {args.model_name}")
+        elif args.agent_framework == "langgraph":
+            if ChatOpenAI is None or create_react_agent is None:
+                print("Error: langgraph/langchain-openai package not found or classes missing.")
+                sys.exit(1)
+
+            # Process model name for langgraph with ChatOpenAI
+            processed_model_name = args.model_name
+            if "/" in args.model_name:
+                prefix, suffix = args.model_name.split("/", 1)
+                if prefix == "openai":
+                    processed_model_name = suffix
+                else:
+                    # Potentially handle other prefixes or raise error if unsupported
+                    print(f"Warning: Using langgraph with non-openai prefix model: {args.model_name}")
+                    processed_model_name = args.model_name # Use original name if not openai
+
+            if prefix == "openai":
+                llm = ChatOpenAI(
+                    model=processed_model_name,
+                    temperature=args.temperature,
+                    model_kwargs={"top_p": args.top_p}, # Pass top_p via model_kwargs
+                    max_tokens=args.max_tokens,
+                )
+            else:
+                # Handle initialization for other LLM providers if needed
+                print(f"Error: Unsupported model provider for langgraph in this script: {prefix}")
+                sys.exit(1)
+
+            # LangGraph's ReAct agent doesn't explicitly take system instructions in the same way.
+            # Tools are empty for this task.
+            agent = create_react_agent(llm, tools=[])
+            print(f"Initialized LangGraph ReAct Agent with model: {processed_model_name}")
+
         else:
             print(f"Error: Unsupported agent_framework '{args.agent_framework}'")
             sys.exit(1)
@@ -152,23 +185,40 @@ if __name__ == "__main__":
         query_data = query_data_list[number-1]
         reference_information = query_data['reference_information']
         agent_response = None
+        token_usage = {"input_tokens": 0, "output_tokens": 0}
         while True:
             # Format the prompt string - used differently depending on the framework
             prompt_text = planner_agent_prompt.format(text=reference_information, query=query_data['query'])
 
             # Call the agent
             if args.agent_framework == "smolagents":
+                # Run smolagents agent
                 agent_response = agent.run(prompt_text, reset=True)
                 planner_results = smolagents_output_to_string(agent_response)
+
+                # Accumulate token usage
+                token_counts = agent.monitor.get_total_token_counts()
+                token_usage["input_tokens"] = token_counts.get("input")
+                token_usage["output_tokens"] = token_counts.get("output")
             elif args.agent_framework == "openai_agents":
+                # Run openai_agents agent
                 agent_response = Runner.run_sync(agent, prompt_text)
                 planner_results = agent_response.final_output
 
-                # Accumulate token usage for this run
-                if total_usage_openai is not None:
-                    for resp in agent_response.raw_responses:
-                            if hasattr(resp, 'usage') and resp.usage is not None:
-                                total_usage_openai.add(resp.usage)
+                # Accumulate token usage
+                for resp in agent_response.raw_responses:
+                    token_usage["input_tokens"] = resp.usage.input_tokens
+                    token_usage["output_tokens"] = resp.usage.output_tokens
+            elif args.agent_framework == "langgraph":
+                # Run langgraph agent
+                agent_response = agent.invoke({"messages": [{"role": "user", "content": prompt_text}]})
+                agent_message_dict = agent_response["messages"][-1]
+                planner_results = agent_message_dict.content
+
+                # Accumulate token usage
+                usage = agent_message_dict.response_metadata["token_usage"]
+                token_usage["input_tokens"] = usage.get('prompt_tokens')
+                token_usage["output_tokens"] = usage.get('completion_tokens')
             else:
                 print(f"Error: Unsupported agent_framework '{args.agent_framework}'")
                 sys.exit(1)
@@ -177,15 +227,8 @@ if __name__ == "__main__":
                 break
 
         # Get token counts
-        if args.agent_framework == "smolagents":
-            token_counts = agent.monitor.get_total_token_counts()
-            total_input_tokens += token_counts.get("input")
-            total_output_tokens += token_counts.get("output")
-        elif args.agent_framework == "openai_agents" and total_usage_openai is not None:
-            for resp in agent_response.raw_responses:
-                if hasattr(resp, 'usage') and resp.usage is not None:
-                    total_input_tokens += resp.usage.input_tokens
-                    total_output_tokens += resp.usage.output_tokens
+        total_input_tokens += token_usage["input_tokens"]
+        total_output_tokens += token_usage["output_tokens"]
 
         print(planner_results)
         # check if the directory exists

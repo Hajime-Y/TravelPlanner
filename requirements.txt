@@ -9,3 +9,5 @@ func_timeout
 smolagents
 litellm
 openai-agents
+langgraph
+langchain-openai
