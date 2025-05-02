@@ -23,7 +23,7 @@ if __name__ == '__main__':
         if args.agent_framework:
             suffix = f'_{args.agent_framework}_{args.strategy}'
     data = build_plan_format_conversion_prompt(directory=args.output_dir, set_type=args.set_type, model_name=args.model_name, strategy=args.strategy,mode=args.mode, agent_framework=args.agent_framework)
-    output_file = f'{args.tmp_dir}/{args.set_type}_{args.model_name}{suffix}_{args.mode}.txt'
+    output_file = f'{args.tmp_dir}/{args.set_type}_{args.model_name.replace("/", "-")}{suffix}_{args.mode}.txt'
 
     total_price = 0
     for idx, prompt in enumerate(tqdm(data)):

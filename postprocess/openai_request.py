@@ -123,19 +123,23 @@ def keep_logprobs_before_eos(tokens, logprobs):
 def catch_openai_api_error(prompt_input: list):
     global KEY_INDEX
     error = sys.exc_info()[0]
-    if error == openai.error.InvalidRequestError:
+    # if error == openai.error.InvalidRequestError:  # Updated for v1.x
+    if error is openai.BadRequestError:
         # something is wrong: e.g. prompt too long
         print(f"InvalidRequestError\nPrompt:\n\n{prompt_input}\n\n")
         assert False
-    elif error == openai.error.RateLimitError:
+    # elif error == openai.error.RateLimitError:  # Updated for v1.x
+    elif error is openai.RateLimitError:
         KEY_INDEX = (KEY_INDEX + 1) % len(KEY_POOL)
         openai.api_key = KEY_POOL[KEY_INDEX]
         print("RateLimitError, now change the key. Current key is ", openai.api_key)
-    elif error == openai.error.APIError:
+    # elif error == openai.error.APIError:  # Updated for v1.x
+    elif error is openai.APIError:
         KEY_INDEX = (KEY_INDEX + 1) % len(KEY_POOL)
         openai.api_key = KEY_POOL[KEY_INDEX]
         print("APIError, now change the key. Current key is ", openai.api_key)
-    elif error == openai.error.AuthenticationError:
+    # elif error == openai.error.AuthenticationError:  # Updated for v1.x
+    elif error is openai.AuthenticationError:
         KEY_INDEX = (KEY_INDEX + 1) % len(KEY_POOL)
         openai.api_key = KEY_POOL[KEY_INDEX]
         print("AuthenticationError, now change the key. Current key is ", openai.api_key)
@@ -186,7 +190,8 @@ def prompt_chatgpt(system_input, user_input, temperature,save_path,index,history
     history.append({"role": "user", "content": user_input})
     while True:
         try:
-            completion = limited_execution_time(openai.ChatCompletion.create,
+            # completion = limited_execution_time(openai.ChatCompletion.create,  # Updated for v1.x
+            completion = limited_execution_time(openai.chat.completions.create,
                 model=model_name,
                 prompt=history,
                 temp=temperature)
@@ -197,10 +202,15 @@ def prompt_chatgpt(system_input, user_input, temperature,save_path,index,history
             catch_openai_api_error(user_input)
             time.sleep(1)
 
-    assistant_output = completion['choices'][0]['message']['content']
+    # assistant_output = completion.choices[0].message.content
+    # history.append({"role": "assistant", "content": assistant_output})
+    # total_prompt_tokens = completion.usage.prompt_tokens
+    # total_completion_tokens = completion.usage.completion_tokens
+    # Updated for v1.x
+    assistant_output = completion.choices[0].message.content
     history.append({"role": "assistant", "content": assistant_output})
-    total_prompt_tokens = completion['usage']['prompt_tokens']
-    total_completion_tokens = completion['usage']['completion_tokens']
+    total_prompt_tokens = completion.usage.prompt_tokens
+    total_completion_tokens = completion.usage.completion_tokens
     with open(save_path,'a+',encoding='utf-8') as f:
         assistant_output = str(index)+"\t"+"\t".join(x for x in assistant_output.split("\n"))
         f.write(assistant_output+'\n')
