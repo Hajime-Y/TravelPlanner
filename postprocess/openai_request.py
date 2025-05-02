@@ -233,7 +233,7 @@ JSON\n"""
         prompt_list.append(prompt)
     return prompt_list
 
-def build_plan_format_conversion_prompt(directory, set_type='validation',model_name='gpt4',strategy='direct',mode='two-stage'):
+def build_plan_format_conversion_prompt(directory, set_type='validation', model_name='gpt4', strategy='direct', mode='two-stage', agent_framework=None):
     prompt_list = []
     prefix = """Please assist me in extracting valid information from a given natural language text and reconstructing it in JSON format, as demonstrated in the following example. If transportation details indicate a journey from one city to another (e.g., from A to B), the 'current_city' should be updated to the destination city (in this case, B). Use a ';' to separate different attractions, with each attraction formatted as 'Name, City'. If there's information about transportation, ensure that the 'current_city' aligns with the destination mentioned in the transportation details (i.e., the current city should follow the format 'from A to B'). Also, ensure that all flight numbers and costs are followed by a colon (i.e., 'Flight Number:' and 'Cost:'), consistent with the provided example. Each item should include ['day', 'current_city', 'transportation', 'breakfast', 'attraction', 'lunch', 'dinner', 'accommodation']. Replace non-specific information like 'eat at home/on the road' with '-'. Additionally, delete any '$' symbols.
 -----EXAMPLE-----
@@ -283,8 +283,15 @@ def build_plan_format_conversion_prompt(directory, set_type='validation',model_n
         suffix = f'_{strategy}'
     for idx in tqdm(idx_number_list):
         generated_plan = json.load(open(f'{directory}/{set_type}/generated_plan_{idx}.json'))
-        if generated_plan[-1][f'{model_name}{suffix}_{mode}_results'] and generated_plan[-1][f'{model_name}{suffix}_{mode}_results'] != "":
-            prompt = prefix + "Text:\n"+generated_plan[-1][f'{model_name}{suffix}_{mode}_results']+"\nJSON:\n"
+
+        if mode == 'sole-planning' and agent_framework:
+            model_name_for_key = model_name.replace("/", "-")
+            result_key = f'{agent_framework}_{model_name_for_key}_{strategy}_sole-planning_results'
+        else:
+            result_key = f'{model_name}{suffix}_{mode}_results'
+
+        if generated_plan[-1][result_key] and generated_plan[-1][result_key] != "":
+            prompt = prefix + "Text:\n"+generated_plan[-1][result_key]+"\nJSON:\n"
         else:
             prompt = ""
         prompt_list.append(prompt)
