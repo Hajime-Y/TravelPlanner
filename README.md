@@ -91,8 +91,7 @@ export SET_TYPE=validation
 export STRATEGY=direct
 
 cd tools/planner
-python sole_planning.py  --set_type $SET_TYPE --output_dir $OUTPUT_DIR --model_name 
-$MODEL_NAME --strategy $STRATEGY
+python sole_planning.py  --set_type $SET_TYPE --output_dir $OUTPUT_DIR --model_name $MODEL_NAME --strategy $STRATEGY
 ```
 
 ### Sole-Planning Agent Mode
@@ -145,7 +144,7 @@ export SET_TYPE=validation
 export EVALUATION_FILE_PATH=your/evaluation/file/path
 
 cd evaluation
-pipenv run python eval.py --set_type $SET_TYPE --evaluation_file_path $EVALUATION_FILE_PATH
+python eval.py --set_type $SET_TYPE --evaluation_file_path $EVALUATION_FILE_PATH
 ```
 
 ## ⚠️Warnings
