@@ -55,11 +55,13 @@ except ImportError:
 try:
     from agno.agent import Agent as AgnoAgent, RunResponse as AgnoRunResponse
     from agno.models.openai import OpenAIChat as AgnoOpenAIChat
+    from agno.tools.reasoning import ReasoningTools
 except ImportError:
     print("agno not installed. Please run `uv add agno`")
     AgnoAgent = None
     AgnoRunResponse = None
     AgnoOpenAIChat = None
+    ReasoningTools = None
 
 def load_line_json_data(filename):
     data = []
@@ -106,7 +108,7 @@ if __name__ == "__main__":
     parser.add_argument("--model_name", type=str, default="openai/gpt-4.1-2025-04-14", help="Model name for the LLM (e.g., 'openai/gpt-4o-mini', 'openai/gpt-4.1-2025-04-14').")
     parser.add_argument("--output_dir", type=str, default="./")
     # parser.add_argument("--strategy", type=str, default="direct") # Strategy fixed to direct
-    parser.add_argument("--agent_framework", type=str, default="smolagents", choices=["smolagents", "openai_agents", "langgraph", "pydanticai", "agno"], help="Agent framework to use.") # Add agent_framework argument
+    parser.add_argument("--agent_framework", type=str, default="smolagents", choices=["smolagents", "openai_agents", "langgraph", "pydanticai", "agno", "agno_reasoning"], help="Agent framework to use.") # Add agent_framework argument
     parser.add_argument("--temperature", type=float, default=0.2, help="Temperature for the LLM.")
     parser.add_argument("--top_p", type=float, default=1.0, help="Top-p for the LLM.")
     parser.add_argument("--max_tokens", type=int, default=None, help="Max tokens for the LLM.")
@@ -217,7 +219,7 @@ if __name__ == "__main__":
                 },
             )
             print(f"Initialized PydanticAI Agent with model: {processed_model_id}")
-        elif args.agent_framework == "agno":
+        elif args.agent_framework == "agno" or args.agent_framework == "agno_reasoning":
             if AgnoAgent is None or AgnoOpenAIChat is None:
                 print("Error: agno package not found or classes missing.")
                 sys.exit(1)
@@ -244,11 +246,21 @@ if __name__ == "__main__":
                 print(f"Error: Unsupported model provider for agno in this script: {prefix}")
                 sys.exit(1)
 
+            agno_tools = []
+            use_reasoning = args.agent_framework == "agno_reasoning"
+            if use_reasoning:
+                if ReasoningTools is not None:
+                    agno_tools.append(ReasoningTools(add_instructions=True))
+                    print("Using Agno Agent with ReasoningTools")
+                else:
+                    print("Error: ReasoningTools selected but not available. Please install `agno[reasoning]`.")
+                    sys.exit(1)
+
             agent = AgnoAgent(
                 model=llm,
-                tools=[], # No tools defined for sole planning
+                tools=agno_tools, # Use the dynamically created list of tools
             )
-            print(f"Initialized Agno Agent with model: {processed_model_name}")
+            print(f"Initialized Agno Agent with model: {processed_model_name}{' and ReasoningTools' if use_reasoning else ''}")
         else:
             print(f"Error: Unsupported agent_framework '{args.agent_framework}'")
             sys.exit(1)
@@ -299,7 +311,7 @@ if __name__ == "__main__":
                 usage = agent_response.usage()
                 token_usage["input_tokens"] = usage.request_tokens
                 token_usage["output_tokens"] = usage.response_tokens
-            elif args.agent_framework == "agno":
+            elif args.agent_framework == "agno" or args.agent_framework == "agno_reasoning":
                 # Run agno agent
                 agent_response: AgnoRunResponse = agent.run(prompt_text)
                 planner_results = agent_response.content
