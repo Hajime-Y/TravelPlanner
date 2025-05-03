@@ -63,6 +63,17 @@ except ImportError:
     AgnoOpenAIChat = None
     ReasoningTools = None
 
+# Add autogen imports
+try:
+    from autogen_agentchat.agents import AssistantAgent
+    from autogen_agentchat.messages import TextMessage
+    from autogen_ext.models.openai import OpenAIChatCompletionClient
+except ImportError:
+    print("autogen not installed. Please run `uv add autogen-agentchat autogen-ext[openai]`")
+    AssistantAgent = None
+    TextMessage = None
+    OpenAIChatCompletionClient = None
+
 def load_line_json_data(filename):
     data = []
     with open(filename, 'r', encoding='utf-8') as f:
@@ -108,7 +119,7 @@ if __name__ == "__main__":
     parser.add_argument("--model_name", type=str, default="openai/gpt-4.1-2025-04-14", help="Model name for the LLM (e.g., 'openai/gpt-4o-mini', 'openai/gpt-4.1-2025-04-14').")
     parser.add_argument("--output_dir", type=str, default="./")
     # parser.add_argument("--strategy", type=str, default="direct") # Strategy fixed to direct
-    parser.add_argument("--agent_framework", type=str, default="smolagents", choices=["smolagents", "openai_agents", "langgraph", "pydanticai", "agno", "agno_reasoning"], help="Agent framework to use.") # Add agent_framework argument
+    parser.add_argument("--agent_framework", type=str, default="smolagents", choices=["smolagents", "openai_agents", "langgraph", "pydanticai", "agno", "agno_reasoning", "autogen"], help="Agent framework to use.") # Add agent_framework argument
     parser.add_argument("--temperature", type=float, default=0.2, help="Temperature for the LLM.")
     parser.add_argument("--top_p", type=float, default=1.0, help="Top-p for the LLM.")
     parser.add_argument("--max_tokens", type=int, default=None, help="Max tokens for the LLM.")
@@ -261,6 +272,40 @@ if __name__ == "__main__":
                 tools=agno_tools, # Use the dynamically created list of tools
             )
             print(f"Initialized Agno Agent with model: {processed_model_name}{' and ReasoningTools' if use_reasoning else ''}")
+        elif args.agent_framework == "autogen":
+            if AssistantAgent is None or TextMessage is None or OpenAIChatCompletionClient is None:
+                print("Error: autogen packages not found or classes missing.")
+                sys.exit(1)
+
+            # Process model name for AutoGen (expects 'openai/gpt-...' or similar)
+            processed_model_name_for_client = args.model_name
+            if "/" in args.model_name:
+                prefix, suffix = args.model_name.split("/", 1)
+                if prefix != "openai": # Currently only support openai prefix
+                    print(f"Warning: Unsupported model prefix for autogen: {prefix}. Using original.")
+                else:
+                    # Use the suffix for OpenAIChatCompletionClient
+                    processed_model_name_for_client = suffix
+
+            if prefix == "openai":
+                model_client = OpenAIChatCompletionClient(
+                    model=processed_model_name_for_client,
+                    temperature=args.temperature,
+                    max_tokens=args.max_tokens,
+                    top_p=args.top_p,
+                )
+            else:
+                print(f"Error: Unsupported model provider for autogen in this script: {prefix}")
+                sys.exit(1)
+
+            # AutoGen doesn't have a direct concept of 'system prompt' in the same way as some other frameworks for simple AssistantAgent.
+            # We'll pass the formatted prompt as the initial message.
+            agent = AssistantAgent(
+                name="TravelPlannerAgent",
+                model_client=model_client,
+            )
+            print(f"Initialized AutoGen AssistantAgent with model: {args.model_name}")
+
         else:
             print(f"Error: Unsupported agent_framework '{args.agent_framework}'")
             sys.exit(1)
@@ -320,6 +365,18 @@ if __name__ == "__main__":
                 usage = agent_response.metrics
                 token_usage["input_tokens"] = usage.get('prompt_tokens')
                 token_usage["output_tokens"] = usage.get('completion_tokens')
+            elif args.agent_framework == "autogen":
+                # Run autogen agent
+                # AutoGen AssistantAgent's run expects a single string task
+                # It doesn't maintain history internally in the simple run case.
+                # We send the combined prompt each time.
+                agent_response = agent.run(task=prompt_text)
+                planner_results = agent_response.messages[-1].content # Assuming last message is the response
+
+                # Accumulate token usage
+                usage = agent_response.messages[-1].models_usage # Assuming usage is in the last message
+                token_usage["input_tokens"] = usage.prompt_tokens
+                token_usage["output_tokens"] = usage.completion_tokens
             else:
                 print(f"Error: Unsupported agent_framework '{args.agent_framework}'")
                 sys.exit(1)
