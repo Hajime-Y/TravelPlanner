@@ -13,7 +13,7 @@ if __name__ == '__main__':
     parser.add_argument("--strategy", type=str, default="direct")
     parser.add_argument("--output_dir", type=str, default="./")
     parser.add_argument("--submission_file_dir", type=str, default="./")
-    parser.add_argument("--agent_framework", type=str, default=None, choices=["smolagents", "openai_agents", "langgraph", "pydanticai"], help="Specify the agent framework used for sole-planning agent mode.")
+    parser.add_argument("--agent_framework", type=str, default=None, choices=["smolagents", "openai_agents", "langgraph", "pydanticai", "agno", "agno_reasoning"], help="Agent framework used for generation.")
 
     args = parser.parse_args()
 
