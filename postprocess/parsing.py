@@ -12,6 +12,7 @@ if __name__ == '__main__':
     parser.add_argument("--strategy", type=str, default="direct")
     parser.add_argument("--output_dir", type=str, default="./")
     parser.add_argument("--tmp_dir", type=str, default="./")
+    parser.add_argument("--agent_framework", type=str, default=None, choices=["smolagents", "openai_agents", "langgraph"], help="Specify the agent framework used for sole-planning agent mode.")
 
     args = parser.parse_args()
 
@@ -19,8 +20,10 @@ if __name__ == '__main__':
         suffix = ''
     elif args.mode == 'sole-planning':
         suffix = f'_{args.strategy}'
-    data = build_plan_format_conversion_prompt(directory=args.output_dir, set_type=args.set_type, model_name=args.model_name, strategy=args.strategy,mode=args.mode)
-    output_file = f'{args.tmp_dir}/{args.set_type}_{args.model_name}{suffix}_{args.mode}.txt'
+        if args.agent_framework:
+            suffix = f'_{args.agent_framework}_{args.strategy}'
+    data = build_plan_format_conversion_prompt(directory=args.output_dir, set_type=args.set_type, model_name=args.model_name, strategy=args.strategy,mode=args.mode, agent_framework=args.agent_framework)
+    output_file = f'{args.tmp_dir}/{args.set_type}_{args.model_name.replace("/", "-")}{suffix}_{args.mode}.txt'
 
     total_price = 0
     for idx, prompt in enumerate(tqdm(data)):
@@ -30,7 +33,7 @@ if __name__ == '__main__':
                 f.write(assistant_output + '\n')
             continue
         results, _, price = prompt_chatgpt("You are a helpful assistant.", index=idx, save_path=output_file,
-                                           user_input=prompt, model_name='gpt-4-1106-preview', temperature=0)
+                                           user_input=prompt, model_name='gpt-4.1-2025-04-14', temperature=0)
         total_price += price
         
     print(f"Parsing Cost:${total_price}")

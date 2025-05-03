@@ -165,7 +165,7 @@ if __name__ == "__main__":
                 llm = ChatOpenAI(
                     model=processed_model_name,
                     temperature=args.temperature,
-                    model_kwargs={"top_p": args.top_p}, # Pass top_p via model_kwargs
+                    top_p=args.top_p,
                     max_tokens=args.max_tokens,
                 )
             else:
