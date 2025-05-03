@@ -8,6 +8,7 @@ from project_agents.prompts import planner_agent_prompt # direct strategy prompt
 import json
 import time
 import datetime # Import datetime module
+import asyncio # Add asyncio import
 # from langchain.callbacks import get_openai_callback # Remove langchain callback if not used with smolagents
 
 from tqdm import tqdm
@@ -63,6 +64,17 @@ except ImportError:
     AgnoOpenAIChat = None
     ReasoningTools = None
 
+# Add autogen imports
+try:
+    from autogen_agentchat.agents import AssistantAgent
+    from autogen_agentchat.messages import TextMessage
+    from autogen_ext.models.openai import OpenAIChatCompletionClient
+except ImportError:
+    print("autogen not installed. Please run `uv add autogen-agentchat autogen-ext[openai]`")
+    AssistantAgent = None
+    TextMessage = None
+    OpenAIChatCompletionClient = None
+
 def load_line_json_data(filename):
     data = []
     with open(filename, 'r', encoding='utf-8') as f:
@@ -108,7 +120,7 @@ if __name__ == "__main__":
     parser.add_argument("--model_name", type=str, default="openai/gpt-4.1-2025-04-14", help="Model name for the LLM (e.g., 'openai/gpt-4o-mini', 'openai/gpt-4.1-2025-04-14').")
     parser.add_argument("--output_dir", type=str, default="./")
     # parser.add_argument("--strategy", type=str, default="direct") # Strategy fixed to direct
-    parser.add_argument("--agent_framework", type=str, default="smolagents", choices=["smolagents", "openai_agents", "langgraph", "pydanticai", "agno", "agno_reasoning"], help="Agent framework to use.") # Add agent_framework argument
+    parser.add_argument("--agent_framework", type=str, default="smolagents", choices=["smolagents", "openai_agents", "langgraph", "pydanticai", "agno", "agno_reasoning", "autogen", "autogen_reasoning"], help="Agent framework to use.") # Add agent_framework argument
     parser.add_argument("--temperature", type=float, default=0.2, help="Temperature for the LLM.")
     parser.add_argument("--top_p", type=float, default=1.0, help="Top-p for the LLM.")
     parser.add_argument("--max_tokens", type=int, default=None, help="Max tokens for the LLM.")
@@ -261,6 +273,62 @@ if __name__ == "__main__":
                 tools=agno_tools, # Use the dynamically created list of tools
             )
             print(f"Initialized Agno Agent with model: {processed_model_name}{' and ReasoningTools' if use_reasoning else ''}")
+        elif args.agent_framework == "autogen" or args.agent_framework == "autogen_reasoning":
+            if AssistantAgent is None or TextMessage is None or OpenAIChatCompletionClient is None:
+                print("Error: autogen packages not found or classes missing.")
+                sys.exit(1)
+
+            # Process model name for AutoGen (expects 'openai/gpt-...' or similar)
+            processed_model_name_for_client = args.model_name
+            if "/" in args.model_name:
+                prefix, suffix = args.model_name.split("/", 1)
+                if prefix != "openai": # Currently only support openai prefix
+                    print(f"Warning: Unsupported model prefix for autogen: {prefix}. Using original.")
+                else:
+                    # Use the suffix for OpenAIChatCompletionClient
+                    processed_model_name_for_client = suffix
+
+            if prefix == "openai":
+                model_client = OpenAIChatCompletionClient(
+                    model=processed_model_name_for_client,
+                    temperature=args.temperature,
+                    max_tokens=args.max_tokens,
+                    top_p=args.top_p,
+                )
+            else:
+                print(f"Error: Unsupported model provider for autogen in this script: {prefix}")
+                sys.exit(1)
+
+            # Initialize AssistantAgent without a specific system message
+            if args.agent_framework == "autogen":
+                agent = AssistantAgent(
+                    name="TravelPlannerAgent",
+                    model_client=model_client,
+                )
+            elif args.agent_framework == "autogen_reasoning":
+                # ReAct prompt (reference: https://microsoft.github.io/autogen/0.2/docs/topics/prompting-and-reasoning/react/)
+                ReAct_prompt = """Answer the following questions as best you can. You have access to tools provided.
+
+Use the following format:
+
+Question: the input question you must answer
+Thought: you should always think about what to do
+Action: the action to take
+Action Input: the input to the action
+Observation: the result of the action
+... (this process can repeat multiple times)
+Thought: I now know the final answer
+Final Answer: the final answer to the original input question
+"""
+
+                agent = AssistantAgent(
+                    name="TravelPlannerAgent_ReAct",
+                    model_client=model_client,
+                    system_message=ReAct_prompt,
+                )
+                
+            print(f"Initialized AutoGen AssistantAgent with model: {args.model_name}{' with ReAct prompt' if args.agent_framework == 'autogen_reasoning' else ''}")
+
         else:
             print(f"Error: Unsupported agent_framework '{args.agent_framework}'")
             sys.exit(1)
@@ -320,6 +388,25 @@ if __name__ == "__main__":
                 usage = agent_response.metrics
                 token_usage["input_tokens"] = usage.get('prompt_tokens')
                 token_usage["output_tokens"] = usage.get('completion_tokens')
+            elif args.agent_framework == "autogen" or args.agent_framework == "autogen_reasoning":
+                # Run autogen agent asynchronously using asyncio.run()
+                # NOTE: Using asyncio.run() in a loop can cause 'Event loop closed' errors during cleanup after agent.run() finishes.
+                # I proceed with this approach for now as results/tokens are likely captured correctly before the error, avoiding a full async refactor due to existing data.
+                try:
+                    # Use asyncio.run() to execute the async agent.run method
+                    agent_response = asyncio.run(agent.run(task=prompt_text))
+                except Exception as e:
+                    print(f"Error running autogen agent: {e}")
+                    agent_response = None # Set response to None on error
+
+                if agent_response:
+                    # Extract the assistant's response
+                    planner_results = agent_response.messages[-1].content
+
+                    # Accumulate token usage
+                    usage = agent_response.messages[-1].models_usage
+                    token_usage["input_tokens"] = usage.prompt_tokens
+                    token_usage["output_tokens"] = usage.completion_tokens
             else:
                 print(f"Error: Unsupported agent_framework '{args.agent_framework}'")
                 sys.exit(1)

@@ -108,7 +108,7 @@ export SET_TYPE=validation
 # AGENT_FRAMEWORK in ['smolagents'] (More frameworks will be added)
 export AGENT_FRAMEWORK=smolagents
 
-pipenv run python -m tools.planner.sole_planning_agent --set_type validation --output_dir ../../results --model_name $MODEL_NAME --agent_framework $AGENT_FRAMEWORK
+python -m tools.planner.sole_planning_agent --set_type validation --output_dir ../../results --model_name $MODEL_NAME --agent_framework $AGENT_FRAMEWORK
 ```
 
 ## Postprocess
@@ -145,7 +145,7 @@ export SET_TYPE=validation
 export EVALUATION_FILE_PATH=your/evaluation/file/path
 
 cd evaluation
-python eval.py --set_type $SET_TYPE --evaluation_file_path $EVALUATION_FILE_PATH
+pipenv run python eval.py --set_type $SET_TYPE --evaluation_file_path $EVALUATION_FILE_PATH
 ```
 
 ## ⚠️Warnings
