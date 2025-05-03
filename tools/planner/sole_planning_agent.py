@@ -51,6 +51,16 @@ except ImportError:
     print("pydantic-ai not installed. Please run `uv add pydantic-ai`")
     PydanticAgent = None
 
+# Add agno imports
+try:
+    from agno.agent import Agent as AgnoAgent, RunResponse as AgnoRunResponse
+    from agno.models.openai import OpenAIChat as AgnoOpenAIChat
+except ImportError:
+    print("agno not installed. Please run `uv add agno`")
+    AgnoAgent = None
+    AgnoRunResponse = None
+    AgnoOpenAIChat = None
+
 def load_line_json_data(filename):
     data = []
     with open(filename, 'r', encoding='utf-8') as f:
@@ -96,7 +106,7 @@ if __name__ == "__main__":
     parser.add_argument("--model_name", type=str, default="openai/gpt-4.1-2025-04-14", help="Model name for the LLM (e.g., 'openai/gpt-4o-mini', 'openai/gpt-4.1-2025-04-14').")
     parser.add_argument("--output_dir", type=str, default="./")
     # parser.add_argument("--strategy", type=str, default="direct") # Strategy fixed to direct
-    parser.add_argument("--agent_framework", type=str, default="smolagents", choices=["smolagents", "openai_agents", "langgraph", "pydanticai"], help="Agent framework to use.") # Add agent_framework argument
+    parser.add_argument("--agent_framework", type=str, default="smolagents", choices=["smolagents", "openai_agents", "langgraph", "pydanticai", "agno"], help="Agent framework to use.") # Add agent_framework argument
     parser.add_argument("--temperature", type=float, default=0.2, help="Temperature for the LLM.")
     parser.add_argument("--top_p", type=float, default=1.0, help="Top-p for the LLM.")
     parser.add_argument("--max_tokens", type=int, default=None, help="Max tokens for the LLM.")
@@ -207,6 +217,38 @@ if __name__ == "__main__":
                 },
             )
             print(f"Initialized PydanticAI Agent with model: {processed_model_id}")
+        elif args.agent_framework == "agno":
+            if AgnoAgent is None or AgnoOpenAIChat is None:
+                print("Error: agno package not found or classes missing.")
+                sys.exit(1)
+
+            # Process model name for agno
+            processed_model_name = args.model_name
+            if "/" in args.model_name:
+                prefix, suffix = args.model_name.split("/", 1)
+                if prefix == "openai":
+                    processed_model_name = suffix
+                else:
+                    # Assuming non-openai prefixes might be handled directly or raise error later
+                    print(f"Warning: Using agno with non-openai prefix model: {args.model_name}")
+
+            # Currently only supporting OpenAI models with agno in this script
+            if prefix == "openai":
+                llm = AgnoOpenAIChat(
+                    id=processed_model_name,
+                    temperature=args.temperature,
+                    max_tokens=args.max_tokens,
+                    top_p=args.top_p,
+                )
+            else:
+                print(f"Error: Unsupported model provider for agno in this script: {prefix}")
+                sys.exit(1)
+
+            agent = AgnoAgent(
+                model=llm,
+                tools=[], # No tools defined for sole planning
+            )
+            print(f"Initialized Agno Agent with model: {processed_model_name}")
         else:
             print(f"Error: Unsupported agent_framework '{args.agent_framework}'")
             sys.exit(1)
@@ -257,6 +299,15 @@ if __name__ == "__main__":
                 usage = agent_response.usage()
                 token_usage["input_tokens"] = usage.request_tokens
                 token_usage["output_tokens"] = usage.response_tokens
+            elif args.agent_framework == "agno":
+                # Run agno agent
+                agent_response: AgnoRunResponse = agent.run(prompt_text)
+                planner_results = agent_response.content
+
+                # Accumulate token usage
+                usage = agent_response.metrics
+                token_usage["input_tokens"] = usage.get('prompt_tokens')
+                token_usage["output_tokens"] = usage.get('completion_tokens')
             else:
                 print(f"Error: Unsupported agent_framework '{args.agent_framework}'")
                 sys.exit(1)
