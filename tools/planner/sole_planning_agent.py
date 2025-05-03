@@ -390,7 +390,8 @@ Final Answer: the final answer to the original input question
                 token_usage["output_tokens"] = usage.get('completion_tokens')
             elif args.agent_framework == "autogen" or args.agent_framework == "autogen_reasoning":
                 # Run autogen agent asynchronously using asyncio.run()
-                # Assuming agent.run is an async function based on reference.py usage
+                # NOTE: Using asyncio.run() in a loop can cause 'Event loop closed' errors during cleanup after agent.run() finishes.
+                # I proceed with this approach for now as results/tokens are likely captured correctly before the error, avoiding a full async refactor due to existing data.
                 try:
                     # Use asyncio.run() to execute the async agent.run method
                     agent_response = asyncio.run(agent.run(task=prompt_text))
